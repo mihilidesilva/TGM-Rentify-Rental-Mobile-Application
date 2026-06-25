@@ -132,7 +132,6 @@ Firebase Storage
 
 ##  Security Features
 
-* Firebase Authentication
 * User-based property access control
 * Secure Firestore rules
 * Protected image storage
