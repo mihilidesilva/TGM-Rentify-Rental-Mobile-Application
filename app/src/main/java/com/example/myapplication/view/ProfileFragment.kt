@@ -9,9 +9,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -22,6 +25,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -98,6 +102,18 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
     // Flag to determine if this is viewing another user's profile
     private var isReadOnly = false
     private var targetUserId: String? = null
+
+    // Search State
+    private var isSearchMode = false
+    
+    // Auto-Search Handler
+    private val searchHandler = Handler(Looper.getMainLooper())
+    private val searchRunnable = Runnable {
+        val query = etSearch.text.toString().trim()
+        if (query.isNotEmpty()) {
+            performSearch(query)
+        }
+    }
 
     // Camera/Gallery Logic State
     private var isEditingProfilePhoto = true
@@ -203,11 +219,34 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         viewModel.searchResults.observe(viewLifecycleOwner) { users ->
             if (users.isEmpty()) {
                 rvSearchResults.visibility = View.GONE
+                
+                // Show Toast if search was attempted but no results
+                // Only show if user explicitly searched (isSearchMode) or auto-search triggered
+                val query = etSearch.text.toString().trim()
+                if (query.isNotEmpty() && isSearchMode) {
+                     // Debounce toast slightly to avoid showing it while typing 
+                     // But here we rely on the list update. Simple toast for now.
+                     // Toast.makeText(requireContext(), "No user found", Toast.LENGTH_SHORT).show() 
+                     // NOTE: Showing toast on every keystroke that returns empty is annoying.
+                     // I'll leave the logic but maybe user wants it.
+                }
             } else {
                 rvSearchResults.visibility = View.VISIBLE
                 searchAdapter.submitList(users)
             }
         }
+        
+        // Add Back Press Handler for Search
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isSearchMode) {
+                    exitSearchMode()
+                } else {
+                    isEnabled = false
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
 
         // Load Data
         if (isReadOnly && targetUserId != null) {
@@ -254,8 +293,16 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         btnMenu.visibility = View.VISIBLE
         btnMenu.setImageResource(R.drawable.ic_menu)
         
-        // Set Menu Click Listener (Navigation Drawer)
+        // Set Menu Click Listener (Navigation Drawer) WITH SEARCH CHECK
         btnMenu.setOnClickListener {
+            
+            // --- NEW: Check if Search Mode is Active ---
+            if (isSearchMode) {
+                exitSearchMode()
+                return@setOnClickListener
+            }
+            // -------------------------------------------
+
             val drawerLayout = requireActivity().findViewById<DrawerLayout>(R.id.drawer_layout)
             val navView = requireActivity().findViewById<NavigationView>(R.id.nav_view)
 
@@ -395,12 +442,41 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
         }
     }
 
+    private fun enableSearchMode() {
+        if (!isSearchMode) {
+            isSearchMode = true
+            btnMenu.setImageResource(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+            // Tint back arrow to ensure visibility (Primary Color)
+            btnMenu.setColorFilter(ContextCompat.getColor(requireContext(), R.color.text_primary), android.graphics.PorterDuff.Mode.SRC_IN)
+        }
+    }
+
+    private fun exitSearchMode() {
+        if (isSearchMode) {
+            isSearchMode = false
+            etSearch.setText("")
+            etSearch.clearFocus()
+            rvSearchResults.visibility = View.GONE
+            
+            // Hide Keyboard
+            val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(etSearch.windowToken, 0)
+            
+            // Restore Hamburger
+            btnMenu.setImageResource(R.drawable.ic_menu)
+            btnMenu.clearColorFilter()
+        }
+    }
+
     private fun setupSearchLogic() {
-        // Search Functionality
+        // Search Functionality (Enter/Search Buttons)
         etSearch.setOnEditorActionListener { v, actionId, event ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH ||
                 actionId == EditorInfo.IME_ACTION_DONE ||
                 event != null && event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_ENTER) {
+                
+                // Clear any pending auto-search
+                searchHandler.removeCallbacks(searchRunnable)
                 
                 val query = etSearch.text.toString().trim()
                 if (query.isNotEmpty()) {
@@ -416,12 +492,44 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             }
         }
         
-        // Clear search results when text is cleared
+        // Enable Search Mode on Focus or Click
+        etSearch.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) enableSearchMode()
+        }
+        etSearch.setOnClickListener {
+            enableSearchMode()
+        }
+        
+        // NEW: Handle Click on Right Drawable (Search Icon)
+        etSearch.setOnTouchListener { v, event ->
+            val DRAWABLE_RIGHT = 2
+            if (event.action == MotionEvent.ACTION_UP) {
+                if (etSearch.compoundDrawables[DRAWABLE_RIGHT] != null) {
+                    if (event.rawX >= (etSearch.right - etSearch.compoundDrawables[DRAWABLE_RIGHT].bounds.width() - etSearch.paddingEnd - 30)) { 
+                        searchHandler.removeCallbacks(searchRunnable)
+                        val query = etSearch.text.toString().trim()
+                        if (query.isNotEmpty()) {
+                            performSearch(query)
+                            val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.hideSoftInputFromWindow(v.windowToken, 0)
+                        }
+                        return@setOnTouchListener true
+                    }
+                }
+            }
+            false
+        }
+        
+        // Clear search results when text is cleared AND AUTO SEARCH
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                searchHandler.removeCallbacks(searchRunnable)
                 if (s.isNullOrEmpty()) {
                     rvSearchResults.visibility = View.GONE
+                } else {
+                    // Auto Search after 500ms
+                    searchHandler.postDelayed(searchRunnable, 500)
                 }
             }
             override fun afterTextChanged(s: Editable?) {}
@@ -452,21 +560,25 @@ class ProfileFragment : Fragment(R.layout.fragment_profile) {
             viewModel.loadProfileData()
         }
         
+        // Reset Search Mode on Resume
+        if (!isReadOnly && isSearchMode) {
+             exitSearchMode()
+        }
+        
+        // RESTORED: Side Drawer Setup for Profile
         if (!isReadOnly) {
-            val navView = activity?.findViewById<NavigationView>(R.id.nav_view)
-            if (navView != null) {
-                navView.menu.clear()
-                if (navView.headerCount > 0) {
-                    navView.removeHeaderView(navView.getHeaderView(0))
-                }
-                navView.inflateHeaderView(R.layout.nav_drawer_custom_layout)
-            }
+             val navView = activity?.findViewById<NavigationView>(R.id.nav_view)
+             if (navView != null) {
+                 navView.menu.clear()
+                 if (navView.headerCount > 0) {
+                     navView.removeHeaderView(navView.getHeaderView(0))
+                 }
+                 navView.inflateHeaderView(R.layout.nav_drawer_custom_layout)
+             }
         }
     }
 
-    // ... Helper functions (showImageSourceDialog, checkCameraPermissionAndLaunch, launchCamera, handleImageSelection, animateAndOpenUrl, updateUI) ...
-    // RESTORING HELPER FUNCTIONS TO ENSURE FILE COMPLETENESS
-
+    // ... Helper functions ...
     private fun showImageSourceDialog() {
         val optionsList = mutableListOf("Take Photo", "Choose from Gallery")
         if (isEditingProfilePhoto) {

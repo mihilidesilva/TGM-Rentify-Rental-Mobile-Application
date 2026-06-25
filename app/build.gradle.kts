@@ -82,8 +82,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
-
-    implementation("com.google.firebase:firebase-storage")
+    // Removed duplicate hardcoded firebase-storage
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 

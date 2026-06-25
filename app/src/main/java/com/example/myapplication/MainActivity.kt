@@ -15,7 +15,7 @@ import com.bumptech.glide.Glide
 import com.example.myapplication.databinding.ActivityMainBinding
 import com.example.myapplication.utils.SharedPreferencesHelper
 // Explicit import to ensure BuildConfig is resolved
-import com.example.myapplication.BuildConfig
+//import com.example.myapplication.BuildConfig
 
 class MainActivity : AppCompatActivity() {
 
@@ -134,7 +134,7 @@ class MainActivity : AppCompatActivity() {
                 binding.navView.removeHeaderView(currentHeader)
             }
             val newHeader = binding.navView.inflateHeaderView(R.layout.nav_tenant_header_main)
-            setupUserName(newHeader)
+            setupHeader(newHeader) // FIXED: Changed from setupUserName to setupHeader
             
             // RESTORE Standard Menu
             binding.navView.menu.clear()
@@ -161,22 +161,25 @@ class MainActivity : AppCompatActivity() {
             nameText.text = if (!userName.isNullOrEmpty()) "Hi, $userName" else "Welcome"
         }
 
-        // 2. Setup Profile Picture (From Code 2)
-        // Checks for multiple common IDs to be safe
-        var profileImage = headerView.findViewById<ImageView>(R.id.iv_profile_avatar)
+        // 2. Setup Profile Picture with Static Fallback
+        var profileImage = headerView.findViewById<ImageView>(R.id.imageView)
         if (profileImage == null) {
-            profileImage = headerView.findViewById(R.id.imageView)
+            profileImage = headerView.findViewById(R.id.iv_profile_avatar)
         }
 
         if (profileImage != null) {
             val imageUrl = prefsHelper.getProfileImageUrl()
+
             if (!imageUrl.isNullOrEmpty()) {
                 Glide.with(this)
                     .load(imageUrl)
-                    .placeholder(R.drawable.ic_tenant_profile_placeholder) // Use your actual placeholder drawable
-                    .error(R.drawable.ic_tenant_profile_placeholder)
+                    .placeholder(R.drawable.static_profile_pic) // Shows while loading
+                    .error(R.drawable.static_profile_pic)       // Shows if error
                     .circleCrop()
                     .into(profileImage)
+            } else {
+                // If no URL exists, show static image immediately
+                profileImage.setImageResource(R.drawable.static_profile_pic)
             }
         }
     }
